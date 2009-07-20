@@ -1,0 +1,10 @@
+Cabal-Version: >= 1.2
+Name: ezq
+Version: 1.0
+Build-type: Simple
+Executable ezq
+  Build-Depends: base, network, containers, mtl, regex-posix,
+                 -- hackage:
+                 httpd-shed >= 0.4, json
+  ghc-options: -O2
+  Main-Is: Ezq.hs
