@@ -1,65 +1,78 @@
 -- | Parse requests from clients.
 module Request(
-    GetRequest(..)
-  , EditRequest(..)
+    Request(..)
+  , Response(..)
+  , Op(..)
   ) where
 
-import Text.Printf
-import Text.JSON
-import Data.Map (Map)
+import           Text.JSON
+import           System.Time
+import           Data.Map (Map)
 import qualified Data.Map as Map
+import           Data.Task.QueueSet(QueueSet)
+import qualified Data.Task.QueueSet as QS
+import qualified Data.Task.Queue as Q
 
-import Queue(Op(..))
+data Op = Add String String 
+        | Remove String Q.Ident
+          deriving (Show)
 
-data GetRequest  = GetRequest [String]
-                   deriving (Show)
-data EditRequest = EditRequest [(String, [Op])]
-                   deriving (Show)
+data Request = GetRequest [(String, Int)]
+             | EditRequest [Op]
+               deriving (Show)
+
+data Response = GetOk [(String, Q.Ident, String)]
+              | EditOk
+              | ResponseError String
+                deriving (Show)
 
 instance JSON Op where
   -- This bit is a big ugly: we use the typeclass as a convenience for
   -- encoding the individual operations, but we actually decode them
   -- only in the context of the EditRequest.
-  showJSON (Add x)    = showJSON x
-  showJSON (Remove x) = showJSON x
+  showJSON (Add queue task)     = showJSON (queue, task)
+  showJSON (Remove queue ident) = showJSON (queue, ident)
 
   readJSON _ = fail "cannot read ops directly."
 
-instance JSON GetRequest where 
+instance JSON Request where
   showJSON (GetRequest r) = showJSON r
-
-  readJSON v = readJSON v >>= mapM readJSON >>= return . GetRequest
-
-instance JSON EditRequest where
-  showJSON (EditRequest r) = 
-    showJSON . toJSObject $ mapsnd opsToObject r
+  showJSON (EditRequest r) =
+    showJSON . toJSObject 
+             $ mapsnd opsToObject
+             $ collectQueues r
     where
-      mapsnd f = map (\(x, y) -> (x, f y)) 
+      mapsnd f = map (\(x, y) -> (x, f y))
 
-      opsToObject = toJSObject 
-                  . Map.toList 
-                  . Map.fromListWith (++)
-                  . map opToAssoc
+      collectQueues = Map.toList . Map.fromListWith (++) . map opToAssoc
+      opsToObject = toJSObject . Map.toList . Map.fromListWith (++)
 
-      opToAssoc op@(Add x)    = ("add", [op])
-      opToAssoc op@(Remove x) = ("remove", [op])
+      opToAssoc op@(Add queue task)     = (queue, [("add", [showJSON task])])
+      opToAssoc op@(Remove queue ident) = (queue, [("remove", [showJSON ident])])
 
+  -- We're lucky: Get & edit requests are different types of json
+  -- objects, so we can pattern match on them for parsing.
+  readJSON (JSArray v) = mapM readJSON v >>= return . GetRequest
   readJSON (JSObject v) =
-    mapM expandOps assoc >>= return . EditRequest
+    concatMapM expandOps (fromJSObject v) >>= return . EditRequest
     where
-      assoc = fromJSObject v
+      expandOps (queue, JSObject ops) =
+        concatMapM expandOp (fromJSObject ops)
+        where 
+          expandOp ("add", JSArray vs)    = mapM parseAdd vs
+          expandOp ("remove", JSArray vs) = mapM parseRemove vs
 
-      expandOps (queue, (JSObject ops)) = 
-        mapM parseOps assoc >>= \ops -> return $ (queue, concat ops)
-        where
-          assoc = fromJSObject ops
+          parseAdd q = readJSON q >>= return . Add queue
+          parseRemove q = readJSON q >>= return . Remove queue
 
-          parseOps ("add", JSArray queues)    = mapM parseAdd queues
-          parseOps ("remove", JSArray queues) = mapM parseRemove queues
-          parseOps op = fail $ printf "Invalid op %s" (show op)
+      -- kind of weird this isn't in the prelude.
+      concatMapM f xs = mapM f xs >>= return . concat
 
-          parseAdd q = readJSON q >>= return . Add 
+  readJSON _ = fail "requests must be either JSON objects or arrays."
 
-          parseRemove q = readJSON q >>= return . Remove
+instance JSON Response where
+  showJSON (GetOk r)            = showJSON r
+  showJSON EditOk               = showJSON "ok"
+  showJSON (ResponseError what) = showJSON $ "error: " ++ what
 
-  readJSON _ = fail "edit requests must be JSON objects."
+  readJSON = fail "cannot decode a GetResponse"

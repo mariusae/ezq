@@ -1,10 +1,18 @@
-Cabal-Version: >= 1.2
-Name: ezq
-Version: 1.0
-Build-type: Simple
+cabal-version: >= 1.2
+name: ezq
+version: 1.0
+build-type: Simple
+
+library
+  build-depends: base >= 4.0, old-time, containers
+  exposed-modules:
+    Data.Task.Queue
+
 Executable ezq
   Build-Depends: base, network, containers, mtl, regex-posix,
+                 old-time,
                  -- hackage:
                  httpd-shed >= 0.4, json
+  -- -Wall
   ghc-options: -O2
   Main-Is: Ezq.hs

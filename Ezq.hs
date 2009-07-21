@@ -1,16 +1,19 @@
 module Main where
 
 import           System.Environment(getArgs)
+import           System.Time
 import           Text.Printf
 import           Text.Regex.Posix
+import           Data.Maybe
+import           Data.Either
 import           Control.Monad
-import           Control.Monad.Trans(liftIO)
 import           Control.Concurrent
-import Text.JSON(decode, Result(..))
+import Text.JSON(decode, encode, Result(..))
 import qualified Network.Shed.Httpd as Httpd
 import qualified Network.URI as URI
+import Data.Task.QueueSet(QueueSet)
+import qualified Data.Task.QueueSet as QS
 
-import Queue
 import Request
 
 maybeLogRequest req = do
@@ -30,41 +33,41 @@ realMain port = do
 
   -- Create a new MVar, curry it onto the dispatcher, then initialize
   -- the server.
-  mq <- newMVar emptyQueueState
+  mq <- newMVar QS.empty
 
   Httpd.initServer port (dispatch mq)
 
-dispatch :: MVar QueueState -> Httpd.Request -> IO Httpd.Response
+resp code = Httpd.Response code []
+
+dispatch :: MVar (QueueSet String) -> Httpd.Request -> IO Httpd.Response
 dispatch mq req = do
-  maybeLogRequest req
+  -- maybeLogRequest req
+  if path /= "/"
+    then return $ Httpd.Response 404 [] "invalid path"
+    else dispatch' mq req
+  where
+    path = URI.uriPath $ Httpd.reqURI req
 
-  -- Run the dispatcher in the other thread.
+dispatch' mq req =
+  case decode body of
+    Ok decoded -> execute decoded
+    Error _    -> return $ resp 400 "invalid request"
 
-  case path =~ "^/([^/]+)/(.*)$" :: (String, String, String, [String])  of
-    ("", path, "", [a, o]) -> dispatchAction a o body mq
-    _                      -> return $ Httpd.Response 404 [] "no such path"
-    where path = URI.uriPath $ Httpd.reqURI req
-          body = Httpd.reqBody req
+  where 
+    body = Httpd.reqBody req
 
--- TODO: helpers for withMVar, modifyMVar (withMQueue, modifyMQueue)
+    execute (GetRequest queues) = do
+      now     <- getClockTime
+      modifyMVar mq $ \qs ->
+        case QS.getAny now queues qs of
+          Just (which, qs') -> return (qs', resp 200 (encode which))
+          Nothing           -> return (qs,  resp 200 "none")
 
-dispatchAction :: String            -- ^ action name
-               -> String            -- ^ object
-               -> String            -- ^ HTTP body
-               -> MVar QueueState   -- ^ the current queue state mvar
-               -> IO Httpd.Response
-dispatchAction "get" _ body mq = do
-  case (decode body) :: Result GetRequest of
-    Ok req ->
-      return $ Httpd.Response 200 [] $ printf "req! %s" (show req)
-    Error what -> 
-      return $ Httpd.Response 400 [] $ printf "bad request %s" what
-dispatchAction "edit" _ body mq = do
-  case (decode body) :: Result EditRequest of
-    Ok req ->
-      return $ Httpd.Response 200 [] $ printf "req! %s" (show req)
-    Error what ->
-      return $ Httpd.Response 400 [] $ printf "bad request %s" what
+    execute (EditRequest ops) = do
+      modifyMVar mq $ \qs ->
+        case foldM applyOp qs ops of
+          Just qs' -> return (qs', resp 200 "ok")
+          Nothing  -> return (qs, resp 400 "fail")
 
-dispatchAction action _ _ _ =
-  return $ Httpd.Response 404 [] $ printf "invalid action %s!" action
+    applyOp qs (Add queue task)     = Just $ QS.add task queue qs
+    applyOp qs (Remove queue ident) = QS.done (queue, ident) qs
