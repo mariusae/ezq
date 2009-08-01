@@ -1,7 +1,7 @@
 all: ezq
 
 ezq: *.hs
-	ghc --make -o ezq Ezq.hs
+	ghc --make -o ezq ezq.hs
 
 test:
 	cd tests; make

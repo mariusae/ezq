@@ -15,4 +15,4 @@ Executable ezq
                  httpd-shed >= 0.4, json
   -- -Wall
   ghc-options: -O2
-  Main-Is: Ezq.hs
+  Main-Is: ezq.hs
