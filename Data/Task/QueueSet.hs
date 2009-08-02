@@ -28,7 +28,7 @@ add t name (QS m) =
 getAny :: System.Time.ClockTime                      -- ^ Current time
        -> [(String, Int)]                            -- ^ [(Name, howlong)]
        -> QueueSet a                                 -- ^ The queueset
-       -> Maybe (((String, Q.Ident), a), QueueSet a)
+       -> Maybe ((Ident, a), QueueSet a)
 getAny now names (QS m) =
   takeFirst eligible
   where

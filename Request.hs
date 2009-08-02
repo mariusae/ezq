@@ -7,7 +7,6 @@ module Request(
 
 import           Text.JSON
 import           System.Time
-import           Data.Map (Map)
 import qualified Data.Map as Map
 import           Data.Task.QueueSet(QueueSet)
 import qualified Data.Task.QueueSet as QS
@@ -44,8 +43,10 @@ instance JSON Request where
     where
       mapsnd f = map (\(x, y) -> (x, f y))
 
-      collectQueues = Map.toList . Map.fromListWith (++) . map opToAssoc
-      opsToObject = toJSObject . Map.toList . Map.fromListWith (++)
+      concatAssocs = Map.toList . Map.fromListWith (++)
+
+      collectQueues = concatAssocs . map opToAssoc
+      opsToObject = toJSObject . concatAssocs
 
       opToAssoc op@(Add queue task)     = (queue, [("add", [showJSON task])])
       opToAssoc op@(Remove queue ident) = (queue, [("remove", [showJSON ident])])
@@ -65,7 +66,7 @@ instance JSON Request where
           parseAdd q = readJSON q >>= return . Add queue
           parseRemove q = readJSON q >>= return . Remove queue
 
-      -- kind of weird this isn't in the prelude.
+      -- Kind of weird something like this isn't in the prelude?
       concatMapM f xs = mapM f xs >>= return . concat
 
   readJSON _ = fail "requests must be either JSON objects or arrays."

@@ -8,10 +8,10 @@ import           Data.Maybe
 import           Data.Either
 import           Control.Monad
 import           Control.Concurrent
-import Text.JSON(decode, encode, Result(..))
+import           Text.JSON(decode, encode, Result(..))
 import qualified Network.Shed.Httpd as Httpd
 import qualified Network.URI as URI
-import Data.Task.QueueSet(QueueSet)
+import           Data.Task.QueueSet(QueueSet)
 import qualified Data.Task.QueueSet as QS
 
 import Request
@@ -51,22 +51,24 @@ dispatch mq req = do
 dispatch' mq req =
   case decode body of
     Ok decoded -> execute decoded
-    Error _    -> return $ resp 400 "invalid request"
+    Error what -> return $ resp 400 $ printf "invalid request: %s" what
 
   where 
     body = Httpd.reqBody req
 
     execute (GetRequest queues) = do
-      now     <- getClockTime
+      now <- getClockTime
       modifyMVar mq $ \qs ->
         case QS.getAny now queues qs of
-          Just (which, qs') -> return (qs', resp 200 (encode which))
-          Nothing           -> return (qs,  resp 200 "none")
+          Just (which, qs') ->
+            let ((queue, ident), task) = which in
+            return (qs', resp 200 (encode $ GetOk [(queue, ident, task)]))
+          Nothing -> return (qs,  resp 200 "none")
 
     execute (EditRequest ops) = do
       modifyMVar mq $ \qs ->
         case foldM applyOp qs ops of
-          Just qs' -> return (qs', resp 200 "ok")
+          Just qs' -> return (qs', resp 200 (encode EditOk))
           Nothing  -> return (qs, resp 400 "fail")
 
     applyOp qs (Add queue task)     = Just $ QS.add task queue qs

@@ -7,4 +7,4 @@ test:
 	cd tests; make
 
 clean:
-	rm -f *.hi *.o ezq
+	rm -f *.hi *.o ezq dist
